@@ -28,12 +28,12 @@ const authState: any = {
   isGuestSession: false,
   isLoading: false,
   saveProfile: vi.fn(),
-  /** Continue sends the OTP; only verify opens the session. */
-  getOtpConfig: vi.fn(async () => ({ otpRequired: true, mode: "on", guestCheckout: false, message: null })),
+  /** Contact Continue opens a checkout session without OTP. */
+  getOtpConfig: vi.fn(async () => ({ otpRequired: false, mode: "off", guestCheckout: true, message: null })),
   sendOtp: vi.fn(async () => ({ expiresInSeconds: 300 })),
   resendOtp: vi.fn(async () => ({ expiresInSeconds: 300 })),
   verifyOtp: vi.fn(async () => {}),
-  /** The checkout opens the customer session (the profile) after verify. */
+  /** The checkout opens a customer session directly. */
   openSession: vi.fn(async (name: string, phone: string, email: string) => ({
     name,
     phone,
@@ -106,9 +106,9 @@ beforeEach(() => {
   authState.isLoading = false;
   authState.saveProfile = vi.fn().mockResolvedValue(undefined);
   authState.getOtpConfig = vi.fn().mockResolvedValue({
-    otpRequired: true,
-    mode: "on",
-    guestCheckout: false,
+    otpRequired: false,
+    mode: "off",
+    guestCheckout: true,
     message: null,
   });
   authState.sendOtp = vi.fn().mockResolvedValue({ expiresInSeconds: 300 });
@@ -124,8 +124,8 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe("checkout — contact step verifies the number with a WhatsApp OTP", () => {
-  it("Continue sends the OTP and reveals the OTP input", async () => {
+describe("checkout — contact step opens an unverified session directly", () => {
+  it("Continue opens the session without requesting an OTP", async () => {
     render(<CheckoutPage />);
     await waitFor(() => screen.getByRole("button", { name: /^Continue$/i }));
     fillContact();
@@ -133,19 +133,15 @@ describe("checkout — contact step verifies the number with a WhatsApp OTP", ()
 
     fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
 
-    // The OTP was requested for the full phone (with country code).
-    await waitFor(() =>
-      expect(authState.sendOtp).toHaveBeenCalledWith("919876543210")
-    );
-    // The OTP input is now visible.
-    await waitFor(() => expect(document.getElementById("checkout-otp")).toBeTruthy());
-    expect(screen.getByRole("button", { name: /Verify & Continue/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Change number/i })).toBeTruthy();
-    // The session has NOT opened yet — verify must come first.
-    expect(authState.openSession).not.toHaveBeenCalled();
+    await waitFor(() => expect(authState.openSession).toHaveBeenCalledWith(
+      "Atharva Bhargava", "919876543210", "atharva@example.com", expect.objectContaining({ website: "" })
+    ));
+    expect(authState.sendOtp).not.toHaveBeenCalled();
+    expect(document.getElementById("checkout-otp")).toBeNull();
+    expect(screen.getByText(/Contact confirmed/i)).toBeTruthy();
   });
 
-  it("verifies the OTP then opens the session and unlocks Place Order", async () => {
+  it("opens the session and unlocks Place Order", async () => {
     render(<CheckoutPage />);
     await waitFor(() => screen.getByRole("button", { name: /^Continue$/i }));
     fillContact();
@@ -153,16 +149,7 @@ describe("checkout — contact step verifies the number with a WhatsApp OTP", ()
     fillAddress();
 
     fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
-    await waitFor(() => expect(document.getElementById("checkout-otp")).toBeTruthy());
-
-    // Type the 6-digit code and verify.
-    const otpInput = document.getElementById("checkout-otp") as HTMLInputElement;
-    fireEvent.change(otpInput, { target: { value: "123456" } });
-    fireEvent.click(screen.getByRole("button", { name: /Verify & Continue/i }));
-
-    await waitFor(() =>
-      expect(authState.verifyOtp).toHaveBeenCalledWith("919876543210", "123456", "Atharva Bhargava")
-    );
+    await waitFor(() => expect(authState.openSession).toHaveBeenCalled());
     await waitFor(() =>
       expect(authState.openSession).toHaveBeenCalledWith(
         "Atharva Bhargava",
@@ -177,10 +164,9 @@ describe("checkout — contact step verifies the number with a WhatsApp OTP", ()
     expect(screen.getByText(/Contact confirmed/i)).toBeTruthy();
   });
 
-  it("shows the server message when OTP send fails with a response", async () => {
-    // A 4xx/5xx with a body must surface the backend's real message.
-    authState.sendOtp = vi.fn().mockRejectedValue({
-      response: { data: { error: { message: "This WhatsApp number cannot receive messages." } } },
+  it("shows the server message when session creation fails", async () => {
+    authState.openSession = vi.fn().mockRejectedValue({
+      response: { data: { error: { message: "Could not create checkout session." } } },
     });
     render(<CheckoutPage />);
     await waitFor(() => screen.getByRole("button", { name: /^Continue$/i }));
@@ -190,7 +176,7 @@ describe("checkout — contact step verifies the number with a WhatsApp OTP", ()
     fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
 
     await waitFor(() =>
-      screen.getByText(/This WhatsApp number cannot receive messages/i)
+      screen.getByText(/Could not create checkout session/i)
     );
     expect(document.getElementById("checkout-otp")).toBeNull();
   });
@@ -198,7 +184,7 @@ describe("checkout — contact step verifies the number with a WhatsApp OTP", ()
   it("shows the friendly connect message on a transport failure (no response)", async () => {
     // Axios surfaces a transport failure as a bare "Network Error" with no
     // .response — the customer sees the friendly connect message.
-    authState.sendOtp = vi.fn().mockRejectedValue(new Error("Network Error"));
+    authState.openSession = vi.fn().mockRejectedValue(new Error("Network Error"));
     render(<CheckoutPage />);
     await waitFor(() => screen.getByRole("button", { name: /^Continue$/i }));
     fillContact();
@@ -207,42 +193,6 @@ describe("checkout — contact step verifies the number with a WhatsApp OTP", ()
     fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
 
     await waitFor(() => screen.getByText(/check your internet and try again/i));
-  });
-
-  it("Change number returns to the contact form", async () => {
-    render(<CheckoutPage />);
-    await waitFor(() => screen.getByRole("button", { name: /^Continue$/i }));
-    fillContact();
-    fillContactEmail();
-
-    fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
-    await waitFor(() => expect(document.getElementById("checkout-otp")).toBeTruthy());
-
-    fireEvent.click(screen.getByRole("button", { name: /Change number/i }));
-
-    await waitFor(() => expect(document.getElementById("checkout-otp")).toBeNull());
-    expect(screen.getByRole("button", { name: /^Continue$/i })).toBeTruthy();
-  });
-
-  it("shows the server message when OTP verify fails", async () => {
-    authState.verifyOtp = vi.fn().mockRejectedValue({
-      response: { data: { error: { message: "The OTP you entered is incorrect." } } },
-    });
-    render(<CheckoutPage />);
-    await waitFor(() => screen.getByRole("button", { name: /^Continue$/i }));
-    fillContact();
-    fillContactEmail();
-
-    fireEvent.click(screen.getByRole("button", { name: /^Continue$/i }));
-    await waitFor(() => expect(document.getElementById("checkout-otp")).toBeTruthy());
-
-    const otpInput = document.getElementById("checkout-otp") as HTMLInputElement;
-    fireEvent.change(otpInput, { target: { value: "999999" } });
-    fireEvent.click(screen.getByRole("button", { name: /Verify & Continue/i }));
-
-    await waitFor(() => screen.getByText(/The OTP you entered is incorrect/i));
-    // The session must NOT have opened.
-    expect(authState.openSession).not.toHaveBeenCalled();
   });
 
   it("shows the full form (name, number, address, email) on a guest's first order", async () => {
@@ -256,7 +206,7 @@ describe("checkout — contact step verifies the number with a WhatsApp OTP", ()
     expect(document.querySelector('input[type="email"]')).toBeTruthy();
   });
 
-  it("keeps Place Order disabled until the OTP is verified", async () => {
+  it("keeps Place Order disabled until the checkout session is opened", async () => {
     render(<CheckoutPage />);
     await waitFor(() => screen.getByRole("button", { name: /^Continue$/i }));
 
@@ -268,15 +218,7 @@ describe("checkout — contact step verifies the number with a WhatsApp OTP", ()
     expect(screen.queryByRole("button", { name: /Processing/i })).toBeNull();
   });
 
-  it("skips the OTP entirely when the backend says none is required", async () => {
-    // OTP_MODE=off / template unapproved -> the config reports otpRequired:false
-    // and Continue must open the session directly with no OTP input.
-    authState.getOtpConfig = vi.fn().mockResolvedValue({
-      otpRequired: false,
-      mode: "off",
-      guestCheckout: true,
-      message: null,
-    });
+  it("opens the checkout session directly without using the OTP configuration", async () => {
     render(<CheckoutPage />);
     await waitFor(() => screen.getByRole("button", { name: /^Continue$/i }));
     fillContact();

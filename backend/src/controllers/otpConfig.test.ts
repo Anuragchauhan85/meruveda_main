@@ -1,5 +1,5 @@
 /**
- * The checkout's OTP-mode switch.
+ * The checkout's fixed no-OTP session flow.
  *
  * The storefront reads ONE value from the server - `otpRequired` - and never
  * from a build-time env var, so a store-wide switch takes effect on the next
@@ -43,16 +43,16 @@ test('OTP_MODE=off tells the storefront that no OTP is needed', async () => {
   }
 });
 
-test('OTP_MODE=auto requires the OTP', async () => {
+test('checkout config never requires OTP', async () => {
   const before = config.otpMode;
   try {
     (config as any).otpMode = 'auto';
     const res = fakeRes();
     await otpConfig({} as any, res, () => undefined);
-    assert.equal(res.body.data.guestCheckout, false);
+    assert.equal(res.body.data.otpRequired, false);
+    assert.equal(res.body.data.guestCheckout, true);
+    assert.equal(res.body.data.mode, 'off');
     assert.match(String(res.headers['Cache-Control'] || ''), /no-store/);
-    // With an approved AUTHENTICATION template the OTP is required.
-    assert.equal(typeof res.body.data.otpRequired, 'boolean');
   } finally {
     (config as any).otpMode = before;
   }

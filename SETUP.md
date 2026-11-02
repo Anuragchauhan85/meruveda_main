@@ -1,4 +1,4 @@
-# SETUP — WhatsApp OTP at checkout
+# Storefront and optional WhatsApp setup
 
 Exact order. Do not skip a step; each one gates the next.
 
@@ -36,7 +36,7 @@ are set.
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | for `wa:verify` | WhatsApp → Settings → Account ID |
 | `WHATSAPP_OTP_TEMPLATE_NAME` | yes | Meta → Message Templates → the **exact** approved name. Must be an **AUTHENTICATION** template (e.g. `meruveda_otp`) |
 | `WHATSAPP_TEMPLATE_LANG` | yes | must match the template, usually `en` |
-| `OTP_ENABLED` | yes | `true` turns on the checkout OTP endpoints |
+| `OTP_ENABLED` | no | Enables separate OTP sign-in endpoints; checkout does not require OTP |
 | `WHATSAPP_DRY_RUN` | no | `false` in production — the server refuses to boot with it `true` |
 | `WHATSAPP_INVOICE_ENABLED` | no | `false` (default) = no WhatsApp invoice. See "Invoices" below |
 | `WHATSAPP_INVOICE_TEMPLATE_NAME` | with the invoice flag | the approved UTILITY invoice template |
@@ -107,17 +107,15 @@ Two failures are common and both are fixed in the Meta console, not in code:
 `npm run wa:verify:send` sends one real test message, and refuses to fire unless
 the template is confirmed approved.
 
-## 5. `npm run otp:smoke -- +91XXXXXXXXXX`
+## 5. Optional OTP sign-in smoke test
 
-**The one manual step, and the only one that proves anything.** It sends a real
-six-digit OTP through the same service the checkout uses, prompts you to type the
-code, verifies it, and prints PASS/FAIL.
+This optional check verifies the separate WhatsApp OTP sign-in service. Storefront
+checkout opens an isolated session directly and does not call the OTP endpoints.
 
 It refuses to run under `WHATSAPP_DRY_RUN=true`, with no token, or with no
 pepper — because those configurations would "pass" while sending nothing.
 
-**Nothing in this document proves OTP delivery.** Until `otp:smoke` passes on a
-real number, treat WhatsApp OTP as unverified.
+OTP delivery is separate from storefront checkout and is verified only by this optional smoke test.
 
 ---
 
